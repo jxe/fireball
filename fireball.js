@@ -58,6 +58,7 @@
 				this.subs.forEach(function(s){
 					ref.off(s[0], s[1]);
 				});
+				this.on_cleared && this.on_cleared();
 			},
 			setup_subs: function(){
 				var ref = this.live_ref;
@@ -65,8 +66,12 @@
 				this.subs.forEach(function(s){ ref.on(s[0], s[1]); });
 			},
 			on: function(ev, cb){
-				this.subs.push([ev, cb]);
-				if (this.live_ref) this.live_ref.on(ev,cb);
+				if (ev == 'cleared'){
+					this.on_cleared = cb;
+				} else {
+					this.subs.push([ev, cb]);
+					if (this.live_ref) this.live_ref.on(ev,cb);
+				}
 			}
 		};
 		dyn.update_ref();
@@ -87,8 +92,8 @@
 
 	// Fireball
 
-	var templates = {}, mapping = {}, computed_fields = {};
-	var show_when = {}, on_click = {};
+	var templates = {}, mapping = {}, calculated_fields = {};
+	var show_when = {}, on_click = {}, on_submit = {};
 
 	function matches(element, selector){
 		if (!element || element.nodeType !== 1) return false;
@@ -109,7 +114,8 @@
 
 	function get_field_value(domid, json, path){
 		if (json[path]) return json[path];
-		if (computed_fields[domid] && computed_fields[domid][path]) return computed_fields[domid][path](json);
+		var key = domid + " " + path;
+		if (calculated_fields[key]) return calculated_fields[key](json);
 		return null;
 	}
 
@@ -119,10 +125,15 @@
 		var parts = directive.split(':');
 		var attr = parts[0], path = parts[1];
 		var val = get_field_value(domid, json, path);
-		el.setAttribute(attr, val);
+		if (attr == 'text'){
+			el.innerHTML = val;
+		} else {
+			el.setAttribute(attr, val);
+		}
 	}
 
 	function project(json, dom, domid){
+		if (!json) json = {};
 		if (typeof json === 'string' || typeof json === 'number'){
 		// if (!hasChildElements(dom)){
 			dom.innerHTML = json;
@@ -212,18 +223,42 @@
 				}
 			}
 		});
+
+		document.addEventListener('submit', function(ev){
+			for (var k in on_submit){
+				var el = closest(ev.target, k);
+				if (el){
+					on_submit[k](el);
+					refresh();
+					ev.stopPropagation();
+					ev.preventDefault();
+					return false;
+				}
+			}
+		});
 	});
 
-	window.Fireball = function(FURL, obj){
-		if (!obj) return mapping[domid] && mapping[domid].live_ref;
-		var F = new Firebase(FURL);
+	function extend(obj, props){
+		for (var k in props){ obj[k] = props[k]; }
+	}
+
+	var firebases = {};
+
+	window.Fireball = function(F, obj){
+		if (!obj) return mapping[F] && mapping[F].live_ref;
+		if (typeof F == "string") {
+			if (!firebases[F]) firebases[F] = new Firebase(F);
+			F = firebases[F];
+		}
 		window.Fireball.set = function(x,y){ return F.param(x,y); };
-		if (obj.live_updating) map_to_dom(F, obj.live_updating);
-		if (obj.on_click) on_click = obj.on_click;
-		if (obj.show_when) show_when = obj.show_when;
-		if (obj.computed_fields) computed_fields = obj.computed_fields;
-		if (obj.init) obj.init(helper);
-		// refresh();
+		if (obj.map) map_to_dom(F, obj.map);
+
+		if (obj.on_click) extend(on_click, obj.on_click);
+		if (obj.on_submit) extend(on_submit, obj.on_submit);
+		if (obj.show_when) extend(show_when, obj.show_when);
+		if (obj.calculated_fields) extend(calculated_fields, obj.calculated_fields);
+		if (obj.init) obj.init();
+		refresh();
 	};
 
 	window.Fireball.refresh = refresh;
